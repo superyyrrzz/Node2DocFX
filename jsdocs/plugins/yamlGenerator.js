@@ -10,7 +10,7 @@
   var yamlMime = '### YamlMime:UniversalReference';
   var outputFileExt = '.yml';
   var jsdocConfigPath = '_jsdocConfTemp.json';
-  var builtInTypes = ['array','arraybuffer','asyncfunction','atomics','boolean','dataview','date','error','evalerror','float32array','float64array','function','generator','generatorfunction','infinity','int16array','int32array','int8array','internalerror','intl','intl.collator','intl.datetimeformat','intl.numberformat','iterator','json','map','math','nan','number','object','parallelarray','promise','proxy','rangeerror','referenceerror','reflect','regexp','simd','simd.bool16x8','simd.bool32x4','simd.bool64x2','simd.bool8x16','simd.float32x4','simd.float64x2','simd.int16x8','simd.int32x4','simd.int8x16','simd.uint16x8','simd.uint32x4','simd.uint8x16','set','sharedarraybuffer','stopiteration','string','symbol','syntaxerror','typeerror','typedarray','urierror','uint16array','uint32array','uint8array','uint8clampedarray','weakmap','weakset', 'undefined'];
+  var builtInTypes = ['array', 'arraybuffer', 'asyncfunction', 'atomics', 'boolean', 'dataview', 'date', 'error', 'evalerror', 'float32array', 'float64array', 'function', 'generator', 'generatorfunction', 'infinity', 'int16array', 'int32array', 'int8array', 'internalerror', 'intl', 'intl.collator', 'intl.datetimeformat', 'intl.numberformat', 'iterator', 'json', 'map', 'math', 'nan', 'number', 'object', 'parallelarray', 'promise', 'proxy', 'rangeerror', 'referenceerror', 'reflect', 'regexp', 'simd', 'simd.bool16x8', 'simd.bool32x4', 'simd.bool64x2', 'simd.bool8x16', 'simd.float32x4', 'simd.float64x2', 'simd.int16x8', 'simd.int32x4', 'simd.int8x16', 'simd.uint16x8', 'simd.uint32x4', 'simd.uint8x16', 'set', 'sharedarraybuffer', 'stopiteration', 'string', 'symbol', 'syntaxerror', 'typeerror', 'typedarray', 'urierror', 'uint16array', 'uint32array', 'uint8array', 'uint8clampedarray', 'weakmap', 'weakset', 'undefined'];
 
   function addItem(item) {
     if (itemsMap[item.uid] && (itemsMap[item.uid].summary && itemsMap[item.uid].summary !== '' || item.summary === '')) {
@@ -55,7 +55,7 @@
     if (doclet.classdesc) {
       item.summary = dfm.convertLinkToGfm(doclet.classdesc, uidPrefix);
     }
-    
+
     var ctor = {
       id: item.id + '.#ctor',
       uid: item.uid + '.#ctor',
@@ -134,47 +134,72 @@
     var fs = require('fs');
     var classes = {};
     var fileMap = {};
+    var namespaceMap = {};
+    var classToNamespaceMap = {};
     if (!fs.existsSync(base)) {
       fs.mkdirSync(base);
     }
     items.forEach(function (item) {
       switch (item.type) {
-      case 'Class':
-        classes[item.uid] = {
-          items: [item],
-          referenceMap: {}
-        };
-        fileMap[item.uid] = item.uid;
-        break;
-      case 'Constructor':
-      case 'Function':
-      case 'Member':
-        var parentId = item.parent || globalUid;
-        var parent = classes[parentId];
-        if (parent === undefined) {
-          console.log(parentId + ' is not a class, ignored.');
+        case 'Class':
+          classes[item.uid] = {
+            items: [item],
+            referenceMap: {}
+          };
+
+          // Calculate the namespace, if applicable.
+          let lastDot = item.uid.lastIndexOf('.');
+          if (lastDot > 0) {
+            let ns = item.uid.substring(0, lastDot);
+            namespaceMap[ns] = namespaceMap[ns] || {};
+            classToNamespaceMap[item.uid] = namespaceMap[ns];
+          }
+
+          fileMap[item.uid] = item.uid;
           break;
-        }
-        parent.items.push(item);
-        if (parentId === globalUid) {
-          (parent.items[0].children = parent.items[0].children || []).push(item.uid);
-        }
-        fileMap[item.uid] = parentId;
-        (item.syntax.parameters || []).forEach(function (p) {
-          (p.type || []).forEach(function (t) {
-            classes[parentId].referenceMap[t] = true;
+        case 'Constructor':
+        case 'Function':
+        case 'Member':
+          var parentId = item.parent || globalUid;
+          var parent = classes[parentId];
+          if (parent === undefined) {
+            console.log(parentId + ' is not a class, ignored.');
+            break;
+          }
+          parent.items.push(item);
+          if (parentId === globalUid) {
+            (parent.items[0].children = parent.items[0].children || []).push(item.uid);
+          }
+          fileMap[item.uid] = parentId;
+          (item.syntax.parameters || []).forEach(function (p) {
+            (p.type || []).forEach(function (t) {
+              classes[parentId].referenceMap[t] = true;
+            });
           });
-        });
-        if (item.syntax.return) {
-          (item.syntax.return.type || []).forEach(function (t) {
-            classes[parentId].referenceMap[t] = true;
-          });
-        }
-        break;
+          if (item.syntax.return) {
+            (item.syntax.return.type || []).forEach(function (t) {
+              classes[parentId].referenceMap[t] = true;
+            });
+          }
+          break;
       }
     });
 
     var toc = [];
+    // Add the namespaces we know of to the toc.
+    for (var ns in namespaceMap) {
+      if (ns === globalUid) {
+        continue;
+      }
+
+      namespaceMap[ns].toc = {
+        uid: ns,
+        name: ns,
+        items: []
+      };
+      toc.push(namespaceMap[ns].toc);
+    }
+
     for (var id in classes) {
       var classItem = classes[id];
       // build references
@@ -213,25 +238,17 @@
       var tocItem = {
         uid: id,
         name: classItem.items[0].name
-      };    
-      // add methods but constructor method to toc
-      // remove methods from toc
-      /*
-      if (classItem.items.length > 1) {
-        for (var itemIndex in classItem.items) {
-          var item = classItem.items[itemIndex];
-          if (item.type === 'Function') {
-            (tocItem.items = tocItem.items || []).push({
-              uid: item.id,
-              name: item.name.replace(/\(.*\)/, '')
-            });
-          }
-        }
+      };
+
+      // Add to namespace children in ToC, or root if global
+      if (classToNamespaceMap[id]) {
+        classToNamespaceMap[id].toc.items.push(tocItem);
+      } else {
+        toc.push(tocItem);
       }
-      */
-      toc.push(tocItem);
     }
-    toc.sort(function (a, b) {
+
+    var sortFn = function (a, b) {
       // sort classes alphabetically, but GLOBAL at last
       if (a.uid === globalUid) {
         return 1;
@@ -249,6 +266,14 @@
       }
 
       return 0;
+    };
+
+    // Sort the toc items, followed by sorting their children.
+    toc.sort(sortFn);
+    toc.forEach(function (rootTocitem) {
+      if (rootTocitem.items) {
+        rootTocitem.items.sort(sortFn);
+      }
     });
 
     fs.writeFileSync(base + '/toc.yml', serializer.safeDump(toc));
@@ -275,7 +300,7 @@
         return;
       }
       // ignore unexported global member
-      if (doclet.memberof === undefined && doclet.kind != 'class' && !(doclet.meta && doclet.meta.code && typeof(doclet.meta.code.name) === 'string' && doclet.meta.code.name.indexOf('exports') == 0)) {
+      if (doclet.memberof === undefined && doclet.kind != 'class' && !(doclet.meta && doclet.meta.code && typeof (doclet.meta.code.name) === 'string' && doclet.meta.code.name.indexOf('exports') == 0)) {
         return;
       }
       // ignore inner function or member
@@ -336,7 +361,7 @@
     parseBegin: function () {
       var fse = require('fs-extra');
       config = fse.readJsonSync(jsdocConfigPath);
-      
+
       if (config.repo && config.repo.url && !config.repo.url.endsWith('.git')) {
         config.repo.url = config.repo.url + '.git';
       }
