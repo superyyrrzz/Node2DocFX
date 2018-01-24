@@ -1,35 +1,16 @@
 (function () {
   /*global env*/
   var dfm = require('./dfm');
+  var manager = require('./itemManager');
+  var itemHandler = require('./itemHandler');
   var config = null;
-  var items = [];
-  var itemsMap = {};
   var base = '_yamlGeneratorOutput';
   var globalUid = 'global';
   var uidPrefix = '';
   var yamlMime = '### YamlMime:UniversalReference';
   var outputFileExt = '.yml';
   var jsdocConfigPath = '_jsdocConfTemp.json';
-  var builtInTypes = ['array', 'arraybuffer', 'asyncfunction', 'atomics', 'boolean', 'dataview', 'date', 'error', 'evalerror', 'float32array', 'float64array', 'function', 'generator', 'generatorfunction', 'infinity', 'int16array', 'int32array', 'int8array', 'internalerror', 'intl', 'intl.collator', 'intl.datetimeformat', 'intl.numberformat', 'iterator', 'json', 'map', 'math', 'nan', 'number', 'object', 'parallelarray', 'promise', 'proxy', 'rangeerror', 'referenceerror', 'reflect', 'regexp', 'simd', 'simd.bool16x8', 'simd.bool32x4', 'simd.bool64x2', 'simd.bool8x16', 'simd.float32x4', 'simd.float64x2', 'simd.int16x8', 'simd.int32x4', 'simd.int8x16', 'simd.uint16x8', 'simd.uint32x4', 'simd.uint8x16', 'set', 'sharedarraybuffer', 'stopiteration', 'string', 'symbol', 'syntaxerror', 'typeerror', 'typedarray', 'urierror', 'uint16array', 'uint32array', 'uint8array', 'uint8clampedarray', 'weakmap', 'weakset', 'undefined'];
-
-  function addItem(item) {
-    if (itemsMap[item.uid] && (itemsMap[item.uid].summary && itemsMap[item.uid].summary !== '' || item.summary === '')) {
-      return;
-    }
-    item.langs = ['js'];
-    // javascript dosen't allow method / class with the same name
-    if (itemsMap[item.uid] !== undefined && items[items.length - 1].uid == item.uid) {
-      items[items.length - 1] = item;
-    } else {
-      if (item.type === 'Class') {
-        // put class in front of item array to ensure serialize won't skip anything useful.
-        items.unshift(item);
-      } else {
-        items.push(item);
-      }
-    }
-    itemsMap[item.uid] = item;
-  }
+  var packageName = '';
 
   function setSourceInfo(item, doclet) {
     if (config.repo) {
@@ -50,111 +31,14 @@
     }
   }
 
-  function handleClass(item, doclet) {
-    item.type = 'Class';
-    if (doclet.classdesc) {
-      item.summary = dfm.convertLinkToGfm(doclet.classdesc, uidPrefix);
-    }
-
-    var ctor = {
-      id: item.id + '.#ctor',
-      uid: item.uid + '.#ctor',
-      parent: item.uid,
-      name: item.name,
-      fullName: item.fullName + '.' + item.name,
-      summary: dfm.convertLinkToGfm(doclet.description, uidPrefix)
-    };
-    handleFunction(ctor, doclet);
-    item.children = [ctor.uid];
-    addItem(ctor);
-  }
-
-  function handleFunction(item, doclet) {
-    item.type = doclet.kind === 'function' ? 'Function' : 'Constructor';
-    item.syntax = {};
-    // set parameters
-    if (doclet.params !== undefined) {
-      item.syntax.parameters = doclet.params.map(function (p) {
-        return {
-          id: p.name,
-          type: handleParameterType(p.type),
-          description: dfm.convertLinkToGfm(p.description, uidPrefix),
-          optional: p.optional
-        };
-      });
-    }
-    // set name and fullName
-    var params = [];
-    (item.syntax.parameters || []).forEach(function (p) {
-      if (p.id.indexOf('.') < 0) params.push(p.id);
-    });
-    item.name += '(' + params.join(', ') + ')';
-    item.fullName += '(' + params.join(', ') + ')';
-    // set return type
-    if (doclet.returns != undefined) {
-      item.syntax.return = {
-        type: handleParameterType(doclet.returns[0].type),
-        description: dfm.convertLinkToGfm(doclet.returns[0].description, uidPrefix),
-        optional: doclet.returns[0].optional
-      };
-    }
-    // set syntax
-    // which one is better:
-    // 1. function method_name(arg1, arg2, ...);
-    // 2. return_type function method_name(arg1, arg2)
-    // 3. function method_name(arg1, arg2) -> return_type
-    item.syntax.content = (item.type === 'Function' ? 'function ' : 'new ') + item.name;
-
-    function handleParameterType(type) {
-      if (!type) return undefined;
-      return type.names.map(function (n) {
-        if (builtInTypes.indexOf(n.toLowerCase()) == -1) {
-          n = uidPrefix + n;
-        }
-        return n;
-      });
-    }
-  }
-
-  function handleMember(item, doclet) {
-    item.type = 'Member';
-    // set type
-    item.syntax = {};
-    if (doclet.type != undefined) {
-      item.syntax.return = {
-        type: [doclet.type.names[0]]
-      };
-    }
-    // set syntax
-    item.syntax.content = item.name;
-  }
-
-  function serializeToc() {
-    var serializer = require('js-yaml');
-    var fs = require('fs');
-    var classes = {};
-    var fileMap = {};
-    var namespaceMap = {};
-    var classToNamespaceMap = {};
-    if (!fs.existsSync(base)) {
-      fs.mkdirSync(base);
-    }
-    items.forEach(function (item) {
+  function getClasses(classes, fileMap) {
+    manager.items.forEach(function (item) {
       switch (item.type) {
         case 'Class':
           classes[item.uid] = {
             items: [item],
             referenceMap: {}
           };
-
-          // Calculate the namespace, if applicable.
-          let lastDot = item.uid.lastIndexOf('.');
-          if (lastDot > 0) {
-            let ns = item.uid.substring(0, lastDot);
-            namespaceMap[ns] = namespaceMap[ns] || {};
-            classToNamespaceMap[item.uid] = namespaceMap[ns];
-          }
-
           fileMap[item.uid] = item.uid;
           break;
         case 'Constructor':
@@ -184,20 +68,78 @@
           break;
       }
     });
+    return classes;
+  }
 
-    var toc = [];
-    // Add the namespaces we know of to the toc.
-    for (var ns in namespaceMap) {
-      if (ns === globalUid) {
-        continue;
+  function serializeIndex(classes) {
+    var serializer = require('js-yaml');
+    var fs = require('fs');
+    if (!fs.existsSync(base)) {
+      fs.mkdirSync(base);
+    }
+
+    var index = {
+      items: [{
+        uid: packageName,
+        name: packageName,
+        langs: ['js'],
+        type: 'package',
+        summary: '',
+        children: []
+      }],
+      references: []
+    };
+
+    for (var id in classes) {
+      var classItem = classes[id];
+      if (id === globalUid) {
+        for (var i = 1; i < classItem.items.length; i++) {
+          index.items[0].children.push(classItem.items[i]);
+        }
+      } else {
+        if (classItem.items && classItem.items.length) {
+          index.items[0].children.push(classItem.items[0].uid);
+          index.references.push({
+            uid: classItem.items[0].uid,
+            name: classItem.items[0].name
+          });
+        }
       }
+    }
 
-      namespaceMap[ns].toc = {
-        uid: ns,
-        name: ns,
-        items: []
-      };
-      toc.push(namespaceMap[ns].toc);
+    index = JSON.parse(JSON.stringify(index));
+    fs.writeFileSync(base + '/index.yml', yamlMime + '\n' + serializer.safeDump(index));
+    console.log('index generated.');
+  }
+
+  function serializeToc(classes, fileMap) {
+    var serializer = require('js-yaml');
+    var fs = require('fs');
+
+    if (!fs.existsSync(base)) {
+      fs.mkdirSync(base);
+    }
+
+    let namespaceMap = {};
+    let classToNamespaceMap = {};
+    let toc = [];
+
+    for (var id in classes) {
+      let classItem = classes[id];
+      let lastDot = id.lastIndexOf('.');
+      if (lastDot > 0) {
+        let ns = id.substring(0, lastDot);
+        namespaceMap[ns] = namespaceMap[ns] || {};
+        classToNamespaceMap[id] = namespaceMap[ns];
+        if (ns !== globalUid && !namespaceMap[ns].toc) {
+          namespaceMap[ns].toc = {
+            uid: ns,
+            name: ns,
+            items: []
+          };
+          toc.push(namespaceMap[ns].toc);
+        }
+      }
     }
 
     for (var id in classes) {
@@ -223,8 +165,8 @@
       // something wrong in js-yaml, workaround it by serialize and deserialize from JSON
       classItem = JSON.parse(JSON.stringify(classItem));
       // replace \r, \n, space with dash
-      // filter global without children
-      if (id == globalUid && (!classItem.items[0].children || classItem.items[0].children.length === 0)) {
+      // filter global
+      if (id == globalUid) {
         continue;
       }
 
@@ -239,7 +181,6 @@
         uid: id,
         name: classItem.items[0].name
       };
-
       // Add to namespace children in ToC, or root if global
       if (classToNamespaceMap[id]) {
         classToNamespaceMap[id].toc.items.push(tocItem);
@@ -248,14 +189,7 @@
       }
     }
 
-    var sortFn = function (a, b) {
-      // sort classes alphabetically, but GLOBAL at last
-      if (a.uid === globalUid) {
-        return 1;
-      }
-      if (b.uid === globalUid) {
-        return -1;
-      }
+    let sortFn = function (a, b) {
       var nameA = a.name.toUpperCase();
       var nameB = b.name.toUpperCase();
       if (nameA < nameB) {
@@ -281,9 +215,9 @@
   }
 
   var typeMap = {
-    'member': handleMember,
-    'function': handleFunction,
-    'class': handleClass
+    'member': itemHandler.handleMember,
+    'function': itemHandler.handleFunction,
+    'class': itemHandler.handleClass
   };
 
   exports.handlers = {
@@ -291,7 +225,7 @@
       var doclet = e.doclet;
       // ignore anything whose parent is not a doclet
       // except it's a class made with help function
-      if (doclet.memberof !== undefined && itemsMap[uidPrefix + doclet.memberof] === undefined && doclet.kind !== 'class') {
+      if (doclet.memberof !== undefined && manager.itemsMap[uidPrefix + doclet.memberof] === undefined && doclet.kind !== 'class') {
         return;
       }
       // ignore unrecognized kind
@@ -325,21 +259,17 @@
       if (!doclet.longname) {
         return;
       }
-      var parent = '';
-      if (doclet.memberof === undefined && doclet.kind !== 'class') {
-        parent = '_global.';
-      }
       // basic properties
       var item = {
-        uid: uidPrefix + parent + doclet.longname,
-        id: uidPrefix + parent + doclet.longname,
+        uid: uidPrefix + doclet.longname,
+        id: uidPrefix + doclet.longname,
         parent: (doclet.memberof && doclet.kind !== 'class') ? (uidPrefix + doclet.memberof) : undefined,
         name: doclet.name,
         summary: doclet.description ? dfm.convertLinkToGfm(doclet.description, uidPrefix) : dfm.convertLinkToGfm(doclet.summary, uidPrefix)
       };
       // set parent
       if (item.parent !== undefined) {
-        parent = itemsMap[item.parent];
+        var parent = manager.itemsMap[item.parent];
         (parent.children = parent.children || []).push(item.uid);
       }
       // set full name
@@ -355,8 +285,8 @@
         item.tags = doclet.tags;
       }
 
-      typeMap[doclet.kind](item, doclet);
-      addItem(item);
+      typeMap[doclet.kind](item, doclet, uidPrefix, manager);
+      manager.addItem(item);
     },
     parseBegin: function () {
       var fse = require('fs-extra');
@@ -370,11 +300,12 @@
       if (config.package) {
         var packageJson = fse.readJsonSync(config.package);
         if (packageJson && packageJson.name) {
+          packageName = packageJson.name;
           globalUid = packageJson.name + '.' + globalUid;
           uidPrefix = packageJson.name + '.';
         }
       }
-      items.push(
+      manager.items.push(
         {
           uid: globalUid,
           id: globalUid,
@@ -386,8 +317,11 @@
       );
     },
     parseComplete: function () {
-      serializeToc();
-      // no need to generate html, directly exit process
+      var classes = {};
+      var fileMap = {};
+      getClasses(classes, fileMap);
+      serializeIndex(classes);
+      serializeToc(classes, fileMap);
       process.exit(0);
     }
   };
