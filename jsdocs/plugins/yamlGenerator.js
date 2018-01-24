@@ -34,38 +34,38 @@
   function getClasses(classes, fileMap) {
     manager.items.forEach(function (item) {
       switch (item.type) {
-        case 'Class':
-          classes[item.uid] = {
-            items: [item],
-            referenceMap: {}
-          };
-          fileMap[item.uid] = item.uid;
+      case 'Class':
+        classes[item.uid] = {
+          items: [item],
+          referenceMap: {}
+        };
+        fileMap[item.uid] = item.uid;
+        break;
+      case 'Constructor':
+      case 'Function':
+      case 'Member':
+        var parentId = item.parent || globalUid;
+        var parent = classes[parentId];
+        if (parent === undefined) {
+          console.log(parentId + ' is not a class, ignored.');
           break;
-        case 'Constructor':
-        case 'Function':
-        case 'Member':
-          var parentId = item.parent || globalUid;
-          var parent = classes[parentId];
-          if (parent === undefined) {
-            console.log(parentId + ' is not a class, ignored.');
-            break;
-          }
-          parent.items.push(item);
-          if (parentId === globalUid) {
-            (parent.items[0].children = parent.items[0].children || []).push(item.uid);
-          }
-          fileMap[item.uid] = parentId;
-          (item.syntax.parameters || []).forEach(function (p) {
-            (p.type || []).forEach(function (t) {
-              classes[parentId].referenceMap[t] = true;
-            });
+        }
+        parent.items.push(item);
+        if (parentId === globalUid) {
+          (parent.items[0].children = parent.items[0].children || []).push(item.uid);
+        }
+        fileMap[item.uid] = parentId;
+        (item.syntax.parameters || []).forEach(function (p) {
+          (p.type || []).forEach(function (t) {
+            classes[parentId].referenceMap[t] = true;
           });
-          if (item.syntax.return) {
-            (item.syntax.return.type || []).forEach(function (t) {
-              classes[parentId].referenceMap[t] = true;
-            });
-          }
-          break;
+        });
+        if (item.syntax.return) {
+          (item.syntax.return.type || []).forEach(function (t) {
+            classes[parentId].referenceMap[t] = true;
+          });
+        }
+        break;
       }
     });
     return classes;
