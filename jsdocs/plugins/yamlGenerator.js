@@ -72,6 +72,9 @@
   }
 
   function serializeIndex(classes) {
+    if (!packageName) {
+      return;
+    }
     var serializer = require('js-yaml');
     var fs = require('fs');
     if (!fs.existsSync(base)) {
