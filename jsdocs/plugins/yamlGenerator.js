@@ -72,6 +72,9 @@
   }
 
   function serializeIndex(classes) {
+    if (!packageName) {
+      return;
+    }
     var serializer = require('js-yaml');
     var fs = require('fs');
     if (!fs.existsSync(base)) {
@@ -106,8 +109,8 @@
         if (classItem.items && classItem.items.length) {
           index.items[0].children.push(classItem.items[0].uid);
           index.references.push({
-            uid : classItem.items[0].uid,
-            name : classItem.items[0].name
+            uid: classItem.items[0].uid,
+            name: classItem.items[0].name
           });
         }
       }
@@ -121,12 +124,33 @@
   function serializeToc(classes, fileMap) {
     var serializer = require('js-yaml');
     var fs = require('fs');
-    
+
     if (!fs.existsSync(base)) {
       fs.mkdirSync(base);
     }
 
-    var toc = [];
+    let namespaceMap = {};
+    let classToNamespaceMap = {};
+    let toc = [];
+
+    for (var id in classes) {
+      let classItem = classes[id];
+      let lastDot = id.lastIndexOf('.');
+      if (lastDot > 0) {
+        let ns = id.substring(0, lastDot);
+        namespaceMap[ns] = namespaceMap[ns] || {};
+        classToNamespaceMap[id] = namespaceMap[ns];
+        if (ns !== globalUid && !namespaceMap[ns].toc) {
+          namespaceMap[ns].toc = {
+            uid: ns,
+            name: ns,
+            items: []
+          };
+          toc.push(namespaceMap[ns].toc);
+        }
+      }
+    }
+
     for (var id in classes) {
       var classItem = classes[id];
       // build references
@@ -165,11 +189,16 @@
       var tocItem = {
         uid: id,
         name: classItem.items[0].name
-      };    
-
-      toc.push(tocItem);
+      };
+      // Add to namespace children in ToC, or root if global
+      if (classToNamespaceMap[id]) {
+        classToNamespaceMap[id].toc.items.push(tocItem);
+      } else {
+        toc.push(tocItem);
+      }
     }
-    toc.sort(function (a, b) {
+
+    let sortFn = function (a, b) {
       var nameA = a.name.toUpperCase();
       var nameB = b.name.toUpperCase();
       if (nameA < nameB) {
@@ -180,6 +209,14 @@
       }
 
       return 0;
+    };
+
+    // Sort the toc items, followed by sorting their children.
+    toc.sort(sortFn);
+    toc.forEach(function (rootTocitem) {
+      if (rootTocitem.items) {
+        rootTocitem.items.sort(sortFn);
+      }
     });
 
     fs.writeFileSync(base + '/toc.yml', serializer.safeDump(toc));
@@ -206,7 +243,7 @@
         return;
       }
       // ignore unexported global member
-      if (doclet.memberof === undefined && doclet.kind != 'class' && !(doclet.meta && doclet.meta.code && typeof(doclet.meta.code.name) === 'string' && doclet.meta.code.name.indexOf('exports') == 0)) {
+      if (doclet.memberof === undefined && doclet.kind != 'class' && !(doclet.meta && doclet.meta.code && typeof (doclet.meta.code.name) === 'string' && doclet.meta.code.name.indexOf('exports') == 0)) {
         return;
       }
       // ignore inner function or member
@@ -263,7 +300,7 @@
     parseBegin: function () {
       var fse = require('fs-extra');
       config = fse.readJsonSync(jsdocConfigPath);
-      
+
       if (config.repo && config.repo.url && !config.repo.url.endsWith('.git')) {
         config.repo.url = config.repo.url + '.git';
       }
